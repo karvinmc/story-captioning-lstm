@@ -18,7 +18,7 @@ To download the dataset from Kaggle:
 
 ## Installing Dependencies
 
-Run these following commands:
+Run the following command to install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
