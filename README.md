@@ -16,6 +16,13 @@ To download the dataset from Kaggle:
 
 ---
 
+## Installing Dependencies
+
+Run these following commands:
+```bash
+pip install -r requirements.txt
+```
+
 ## Training
 
 Run the following command to train the model:
