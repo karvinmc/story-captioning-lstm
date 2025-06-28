@@ -53,7 +53,7 @@ if __name__ == "__main__":
     optimizer = optim.Adam(params, lr=3e-4)
 
     # Training Loop
-    EPOCHS = 10
+    EPOCHS = 50
     for epoch in range(EPOCHS):
         cnn.train()
         lstm.train()
