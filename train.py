@@ -57,7 +57,7 @@ if __name__ == "__main__":
 
     # Load weights if available
     if os.path.exists("checkpoints/cnn_model.pth"):
-        cnn.load_state_dict(torch.load("cnn_model.pth", map_location=device))
+        cnn.load_state_dict(torch.load("checkpoints/cnn_model.pth", map_location=device))
         print("Loaded CNN weights from cnn_model.pth")
     if os.path.exists("checkpoints/story_encoder.pth"):
         story_encoder.load_state_dict(
@@ -65,7 +65,7 @@ if __name__ == "__main__":
         )
         print("Loaded StoryEncoder weights from story_encoder.pth")
     if os.path.exists("checkpoints/lstm_model.pth"):
-        lstm.load_state_dict(torch.load("lstm_model.pth", map_location=device))
+        lstm.load_state_dict(torch.load("checkpoints/lstm_model.pth", map_location=device))
         print("Loaded LSTM weights from lstm_model.pth")
 
     # Training Components
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     val_losses = []
 
     # Training Loop
-    EPOCHS = 10
+    EPOCHS = 50
     for epoch in range(EPOCHS):
         cnn.train()
         story_encoder.train()

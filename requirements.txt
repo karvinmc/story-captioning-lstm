@@ -5,3 +5,5 @@ matplotlib
 opencv-python
 tqdm
 scikit-learn
+
+--extra-index-url https://download.pytorch.org/whl/cu128
