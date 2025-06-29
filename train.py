@@ -1,4 +1,3 @@
-# main.py
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
@@ -11,10 +10,10 @@ from utils.plot import plot_losses
 from utils.checkpoint import save_checkpoint, load_checkpoint
 from tqdm import tqdm
 import os
-
+import json
 
 # --- Config ---
-EPOCHS = 10
+EPOCHS = 5
 BATCH_SIZE = 8
 EMBED_SIZE = 256
 HIDDEN_SIZE = 512
@@ -30,12 +29,14 @@ transform = transforms.Compose(
     ]
 )
 
-# --- Build Vocab ---
-import json
-
+# --- Build Vocabulary ---
 with open("dataset/Train.json") as f:
     train_data = json.load(f)["annotations"]
-captions = [item[0]["storytext"] for item in train_data]
+captions = [
+    " ".join(item[0]["storytext"] for item in group)
+    for group in json.load(open("dataset/Train.json"))["annotations"]
+    if len(group) == 5
+]
 vocab = Vocabulary(FREQ_THRESHOLD)
 vocab.build_vocab(captions)
 
@@ -74,32 +75,26 @@ train_losses, val_losses = [], []
 best_val_loss = float("inf")
 
 for epoch in range(EPOCHS):
-    print(f"Starting Epoch {epoch+1}/{EPOCHS}...")
+    print(f"\n--- Epoch {epoch+1}/{EPOCHS} ---")
     encoder.train()
     decoder.train()
     total_loss = 0
 
-    for batch in tqdm(train_dl, desc=f"Train Epoch {epoch+1}/{EPOCHS}"):
+    for batch in tqdm(train_dl, desc=f"Train Epoch {epoch+1}"):
         images, captions = zip(*batch)
-        images = torch.stack(images).to(DEVICE)
-        token_seqs = list(zip(*captions))
-        input_tokens = [
-            torch.nn.utils.rnn.pad_sequence(x, batch_first=True).to(DEVICE)
-            for x in token_seqs
-        ]
-        target_tokens = [x[:, 1:].contiguous() for x in input_tokens]
+        images = torch.stack(images).to(DEVICE)  # (B, 5, 3, H, W)
+        captions = torch.nn.utils.rnn.pad_sequence(captions, batch_first=True).to(
+            DEVICE
+        )  # (B, seq_len)
+
+        inputs = captions[:, :-1]
+        targets = captions[:, 1:]
 
         optimizer.zero_grad()
-        features = encoder(images)
-        outputs = decoder(features, input_tokens)
+        features = encoder(images)  # (B, 5, embed)
+        outputs = decoder(features, inputs)  # (B, seq_len-1, vocab_size)
 
-        loss = (
-            sum(
-                criterion(out.view(-1, out.size(2)), tgt.reshape(-1))
-                for out, tgt in zip(outputs, target_tokens)
-            )
-            / 5
-        )
+        loss = criterion(outputs.view(-1, outputs.size(2)), targets.reshape(-1))
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
@@ -110,34 +105,28 @@ for epoch in range(EPOCHS):
     encoder.eval()
     decoder.eval()
     val_loss = 0
+
     with torch.no_grad():
-        for batch in tqdm(val_dl, desc=f"Val Epoch {epoch+1}/{EPOCHS}"):
+        for batch in tqdm(val_dl, desc=f"Val Epoch {epoch+1}"):
             images, captions = zip(*batch)
             images = torch.stack(images).to(DEVICE)
-            token_seqs = list(zip(*captions))
-            input_tokens = [
-                torch.nn.utils.rnn.pad_sequence(x, batch_first=True).to(DEVICE)
-                for x in token_seqs
-            ]
-            target_tokens = [x[:, 1:].contiguous() for x in input_tokens]
+            captions = torch.nn.utils.rnn.pad_sequence(captions, batch_first=True).to(
+                DEVICE
+            )
+
+            inputs = captions[:, :-1]
+            targets = captions[:, 1:]
 
             features = encoder(images)
-            outputs = decoder(features, input_tokens)
+            outputs = decoder(features, inputs)
 
-            loss = (
-                sum(
-                    criterion(out.view(-1, out.size(2)), tgt.reshape(-1))
-                    for out, tgt in zip(outputs, target_tokens)
-                )
-                / 5
-            )
+            loss = criterion(outputs.view(-1, outputs.size(2)), targets.reshape(-1))
             val_loss += loss.item()
 
     val_losses.append(val_loss / len(val_dl))
-    print(
-        f"Epoch {epoch+1}/{EPOCHS}, Train Loss: {train_losses[-1]:.4f}, Val Loss: {val_losses[-1]:.4f}"
-    )
+    print(f"Train Loss: {train_losses[-1]:.4f} | Val Loss: {val_losses[-1]:.4f}")
 
+    # Save best model
     if val_losses[-1] < best_val_loss:
         best_val_loss = val_losses[-1]
         save_checkpoint(
@@ -147,7 +136,7 @@ for epoch in range(EPOCHS):
             epoch + 1,
             train_losses[-1],
             val_losses[-1],
-            path="checkpoints/story_model.pth",
+            path=checkpoint_path,
         )
 
 # --- Plot ---
