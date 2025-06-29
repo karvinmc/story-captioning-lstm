@@ -13,7 +13,7 @@ import os
 import json
 
 # --- Config ---
-EPOCHS = 5
+EPOCHS = 6
 BATCH_SIZE = 8
 EMBED_SIZE = 256
 HIDDEN_SIZE = 512
@@ -60,21 +60,27 @@ optimizer = torch.optim.Adam(
 )
 
 checkpoint_path = "checkpoints/story_model.pth"
+start_epoch = 0
+train_losses, val_losses = [], []
+best_val_loss = float("inf")
+patience = 3  # <-- tambahkan ini untuk early stopping
+counter = 0   # <-- tambahkan ini untuk early stopping
+
 if os.path.exists(checkpoint_path):
+    # Load checkpoint and restore everything
     last_epoch, last_train_loss, last_val_loss = load_checkpoint(
         checkpoint_path, encoder, decoder, optimizer
     )
     print(
         f"Resumed from Epoch {last_epoch} | Train Loss: {last_train_loss:.4f}, Val Loss: {last_val_loss:.4f}"
     )
+    start_epoch = last_epoch  # continue from last saved epoch
+    # Optionally, load train_losses and val_losses if you save them in checkpoint
 else:
     print("No checkpoint found. Starting from scratch.")
 
 # --- Training ---
-train_losses, val_losses = [], []
-best_val_loss = float("inf")
-
-for epoch in range(EPOCHS):
+for epoch in range(start_epoch, EPOCHS):
     print(f"\n--- Epoch {epoch+1}/{EPOCHS} ---")
     encoder.train()
     decoder.train()
@@ -126,18 +132,25 @@ for epoch in range(EPOCHS):
     val_losses.append(val_loss / len(val_dl))
     print(f"Train Loss: {train_losses[-1]:.4f} | Val Loss: {val_losses[-1]:.4f}")
 
-    # Save best model
+    # Save best model & early stopping logic
     if val_losses[-1] < best_val_loss:
         best_val_loss = val_losses[-1]
+        counter = 0  # reset counter jika ada perbaikan
         save_checkpoint(
             encoder,
             decoder,
             optimizer,
-            epoch + 1,
+            epoch + 1,  # save current epoch (so next start from here)
             train_losses[-1],
             val_losses[-1],
             path=checkpoint_path,
         )
+    else:
+        counter += 1
+        print(f"Validation loss did not improve for {counter} epoch(s).")
+        if counter >= patience:
+            print("Early stopping triggered.")
+            break
 
 # --- Plot ---
 plot_losses(train_losses, val_losses)
