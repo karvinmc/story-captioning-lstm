@@ -80,21 +80,21 @@ def generate_caption_from_sequence(image_tensors: list[torch.Tensor], max_len=30
         return " ".join(words)
 
 
-def clean_caption(caption: str) -> str:
-    # Split by '.' and take the first full sentence
-    parts = caption.strip().split(".")
-    if parts:
-        first_sentence = parts[0].strip()
-        if first_sentence:
-            return first_sentence + "."  # add the period back
-    return caption  # fallback if no period found
+# def clean_caption(caption: str) -> str:
+#     # Split by '.' and take the first full sentence
+#     parts = caption.strip().split(".")
+#     if parts:
+#         first_sentence = parts[0].strip()
+#         if first_sentence:
+#             return first_sentence + "."  # add the period back
+#     return caption  # fallback if no period found
 
 
 # --- Run Inference ---
 if __name__ == "__main__":
     images = load_images(image_paths)
     caption = generate_caption_from_sequence(images)
-    caption = clean_caption(caption)  # Clean caption to ensure it ends with a period
+    # caption = clean_caption(caption)  # Clean caption to ensure it ends with a period (sementara tak disable)
 
     print("Generated Story Caption:", caption)
 
