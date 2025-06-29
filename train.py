@@ -1,170 +1,154 @@
+# main.py
 import torch
+import torch.nn as nn
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-from torch import nn, optim
+from preprocessing.story_dataset import StoryDataset
+from models.encoder import CNNEncoder
+from models.decoder import LSTMDecoder
+from utils.vocab import Vocabulary
+from utils.plot import plot_losses
+from utils.checkpoint import save_checkpoint, load_checkpoint
 from tqdm import tqdm
 import os
+
+
+# --- Config ---
+EPOCHS = 10
+BATCH_SIZE = 8
+EMBED_SIZE = 256
+HIDDEN_SIZE = 512
+FREQ_THRESHOLD = 3
+LR = 1e-3
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# --- Transform ---
+transform = transforms.Compose(
+    [
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+    ]
+)
+
+# --- Build Vocab ---
 import json
 
-from models.cnn import SimpleCNN
-from models.lstm import CaptionLSTM
-from models.story_encoder import StoryEncoder
-from utils.vocab import Vocabulary
-from utils.preprocessing import StoryDataset
-from config import *
+with open("dataset/Train.json") as f:
+    train_data = json.load(f)["annotations"]
+captions = [item[0]["storytext"] for item in train_data]
+vocab = Vocabulary(FREQ_THRESHOLD)
+vocab.build_vocab(captions)
 
-import matplotlib.pyplot as plt
+# --- Datasets ---
+train_ds = StoryDataset("dataset/Train.json", "dataset/Images", vocab, transform)
+val_ds = StoryDataset("dataset/Validation.json", "dataset/Images", vocab, transform)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+train_dl = DataLoader(
+    train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=lambda x: x
+)
+val_dl = DataLoader(
+    val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=lambda x: x
+)
 
-if __name__ == "__main__":
-    train_json = "dataset/Train.json"
-    with open(train_json, "r") as f:
-        data = json.load(f)
-        all_captions = []
-        for storylet in data["annotations"]:
-            for item in storylet:
-                all_captions.append(item["storytext"])
+# --- Model ---
+encoder = CNNEncoder(EMBED_SIZE).to(DEVICE)
+decoder = LSTMDecoder(EMBED_SIZE, HIDDEN_SIZE, len(vocab)).to(DEVICE)
+criterion = nn.CrossEntropyLoss(ignore_index=vocab.word2idx["<PAD>"])
+optimizer = torch.optim.Adam(
+    list(encoder.parameters()) + list(decoder.parameters()), lr=LR
+)
 
-    vocab = Vocabulary(freq_threshold=VOCAB_THRESHOLD)
-    vocab.build_vocab(all_captions)
-
-    torch.save(vocab, "checkpoints/vocab.pt")
-
-    # Dataset & DataLoader
-    dataset = StoryDataset("dataset/Images", train_json, vocab)
-    dataloader = DataLoader(
-        dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS
+checkpoint_path = "checkpoints/story_model.pth"
+if os.path.exists(checkpoint_path):
+    last_epoch, last_train_loss, last_val_loss = load_checkpoint(
+        checkpoint_path, encoder, decoder, optimizer
     )
-
-    # Validation Dataset & DataLoader
-    val_json = "dataset/Validation.json"
-    val_dataset = StoryDataset("dataset/Images", val_json, vocab)
-    val_dataloader = DataLoader(
-        val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS
+    print(
+        f"Resumed from Epoch {last_epoch} | Train Loss: {last_train_loss:.4f}, Val Loss: {last_val_loss:.4f}"
     )
+else:
+    print("No checkpoint found. Starting from scratch.")
 
-    # Model
-    cnn = SimpleCNN(output_dim=EMBEDDING_DIM).to(device)
-    story_encoder = StoryEncoder(
-        feature_dim=EMBEDDING_DIM, hidden_dim=EMBEDDING_DIM,
-    ).to(device)
-    lstm = CaptionLSTM(
-        embed_size=EMBEDDING_DIM,
-        hidden_size=HIDDEN_DIM,
-        vocab_size=len(vocab.stoi),
-        feature_size=EMBEDDING_DIM,
-    ).to(device)
+# --- Training ---
+train_losses, val_losses = [], []
+best_val_loss = float("inf")
 
-    # Load weights if available
-    if os.path.exists("checkpoints/cnn_model.pth"):
-        cnn.load_state_dict(torch.load("checkpoints/cnn_model.pth", map_location=device))
-        print("Loaded CNN weights from cnn_model.pth")
-    if os.path.exists("checkpoints/story_encoder.pth"):
-        story_encoder.load_state_dict(
-            torch.load("checkpoints/story_encoder.pth", map_location=device)
+for epoch in range(EPOCHS):
+    print(f"Starting Epoch {epoch+1}/{EPOCHS}...")
+    encoder.train()
+    decoder.train()
+    total_loss = 0
+
+    for batch in tqdm(train_dl, desc=f"Train Epoch {epoch+1}/{EPOCHS}"):
+        images, captions = zip(*batch)
+        images = torch.stack(images).to(DEVICE)
+        token_seqs = list(zip(*captions))
+        input_tokens = [
+            torch.nn.utils.rnn.pad_sequence(x, batch_first=True).to(DEVICE)
+            for x in token_seqs
+        ]
+        target_tokens = [x[:, 1:].contiguous() for x in input_tokens]
+
+        optimizer.zero_grad()
+        features = encoder(images)
+        outputs = decoder(features, input_tokens)
+
+        loss = (
+            sum(
+                criterion(out.view(-1, out.size(2)), tgt.reshape(-1))
+                for out, tgt in zip(outputs, target_tokens)
+            )
+            / 5
         )
-        print("Loaded StoryEncoder weights from story_encoder.pth")
-    if os.path.exists("checkpoints/lstm_model.pth"):
-        lstm.load_state_dict(torch.load("checkpoints/lstm_model.pth", map_location=device))
-        print("Loaded LSTM weights from lstm_model.pth")
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
 
-    # Training Components
-    criterion = nn.CrossEntropyLoss(ignore_index=vocab.stoi["<PAD>"])
-    params = (
-        list(cnn.parameters())
-        + list(story_encoder.parameters())
-        + list(lstm.parameters())
-    )
-    optimizer = optim.Adam(params, lr=3e-4, weight_decay=1e-5)
+    train_losses.append(total_loss / len(train_dl))
 
-    def evaluate(model_cnn, model_story_encoder, model_lstm, dataloader, criterion):
-        model_cnn.eval()
-        model_story_encoder.eval()
-        model_lstm.eval()
-        val_loss = 0
-        with torch.no_grad():
-            for imgs, caps in dataloader:
-                B, N, C, H, W = imgs.shape
-                imgs = imgs.view(B * N, C, H, W).to(device)
-                caps = caps.to(device)
-                features = model_cnn(imgs)
-                features = features.view(B, N, -1)
-                story_feature = model_story_encoder(features)
-                outputs = model_lstm(story_feature, caps[:, :-1])
-                loss = criterion(
-                    outputs.reshape(-1, outputs.shape[2]), caps[:, 1:].reshape(-1)
+    # --- Validation ---
+    encoder.eval()
+    decoder.eval()
+    val_loss = 0
+    with torch.no_grad():
+        for batch in tqdm(val_dl, desc=f"Val Epoch {epoch+1}/{EPOCHS}"):
+            images, captions = zip(*batch)
+            images = torch.stack(images).to(DEVICE)
+            token_seqs = list(zip(*captions))
+            input_tokens = [
+                torch.nn.utils.rnn.pad_sequence(x, batch_first=True).to(DEVICE)
+                for x in token_seqs
+            ]
+            target_tokens = [x[:, 1:].contiguous() for x in input_tokens]
+
+            features = encoder(images)
+            outputs = decoder(features, input_tokens)
+
+            loss = (
+                sum(
+                    criterion(out.view(-1, out.size(2)), tgt.reshape(-1))
+                    for out, tgt in zip(outputs, target_tokens)
                 )
-                val_loss += loss.item()
-        return val_loss / len(dataloader)
+                / 5
+            )
+            val_loss += loss.item()
 
-    best_val_loss = float("inf")
-    patience = 3
-    counter = 0
+    val_losses.append(val_loss / len(val_dl))
+    print(
+        f"Epoch {epoch+1}/{EPOCHS}, Train Loss: {train_losses[-1]:.4f}, Val Loss: {val_losses[-1]:.4f}"
+    )
 
-    train_losses = []
-    val_losses = []
-
-    # Training Loop
-    EPOCHS = 50
-    for epoch in range(EPOCHS):
-        cnn.train()
-        story_encoder.train()
-        lstm.train()
-        epoch_loss = 0
-
-        for imgs, caps in tqdm(dataloader, desc=f"Epoch {epoch+1}/{EPOCHS}"):
-            # imgs: [B, N, 3, H, W] (N = number of images per story)
-            B, N, C, H, W = imgs.shape
-            imgs = imgs.view(B * N, C, H, W).to(device)
-            caps = caps.to(device)
-            optimizer.zero_grad()
-
-            features = cnn(imgs)  # [B*N, feature_dim]
-            features = features.view(B, N, -1)  # [B, N, feature_dim]
-            story_feature = story_encoder(features)  # [B, feature_dim]
-
-            outputs = lstm(story_feature, caps[:, :-1])  # input
-            loss = criterion(
-                outputs.reshape(-1, outputs.shape[2]), caps[:, 1:].reshape(-1)
-            )  # target
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
-
-        train_loss = epoch_loss / len(dataloader)
-        val_loss = evaluate(cnn, story_encoder, lstm, val_dataloader, criterion)
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        print(
-            f"Epoch {epoch+1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
+    if val_losses[-1] < best_val_loss:
+        best_val_loss = val_losses[-1]
+        save_checkpoint(
+            encoder,
+            decoder,
+            optimizer,
+            epoch + 1,
+            train_losses[-1],
+            val_losses[-1],
+            path="checkpoints/story_model.pth",
         )
 
-        # Early stopping (sementara tak disable)
-        # if val_loss < best_val_loss:
-        #     best_val_loss = val_loss
-        #     counter = 0
-        #     # Save best model
-        #     torch.save(cnn.state_dict(), "checkpoints/cnn_model.pth")
-        #     torch.save(story_encoder.state_dict(), "checkpoints/story_encoder.pth")
-        #     torch.save(lstm.state_dict(), "checkpoints/lstm_model.pth")
-        # else:
-        #     counter += 1
-        #     if counter >= patience:
-        #         print("Early stopping triggered.")
-        #         break
-
-    # Save models after training
-    torch.save(cnn.state_dict(), "checkpoints/cnn_model.pth")
-    torch.save(story_encoder.state_dict(), "checkpoints/story_encoder.pth")
-    torch.save(lstm.state_dict(), "checkpoints/lstm_model.pth")
-
-    # Plot training and validation loss curves
-    plt.figure()
-    plt.plot(train_losses, label='Train Loss')
-    plt.plot(val_losses, label='Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Loss Curves')
-    plt.legend()
-    plt.savefig('loss_curve.png')
-    plt.show()
+# --- Plot ---
+plot_losses(train_losses, val_losses)

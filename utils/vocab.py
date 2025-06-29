@@ -1,28 +1,33 @@
+# utils/vocab.py
 from collections import Counter
-
-
-def simple_tokenize(text):
-    return text.lower().split()
 
 
 class Vocabulary:
     def __init__(self, freq_threshold):
         self.freq_threshold = freq_threshold
-        self.itos = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>", 3: "<UNK>"}
-        self.stoi = {v: k for k, v in self.itos.items()}
+        self.word2idx = {"<PAD>": 0, "<SOS>": 1, "<EOS>": 2, "<UNK>": 3}
+        self.idx2word = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>", 3: "<UNK>"}
+
+    def __len__(self):
+        return len(self.word2idx)
+
+    def tokenizer(self, text):
+        return text.lower().strip().split()
 
     def build_vocab(self, sentences):
-        freq = Counter()
-        idx = 4
+        frequencies = Counter()
         for sentence in sentences:
-            for word in simple_tokenize(sentence):
-                freq[word] += 1
-                if freq[word] == self.freq_threshold:
-                    self.stoi[word] = idx
-                    self.itos[idx] = word
-                    idx += 1
+            tokens = self.tokenizer(sentence)
+            frequencies.update(tokens)
+
+        for word, freq in frequencies.items():
+            if freq >= self.freq_threshold:
+                idx = len(self.word2idx)
+                self.word2idx[word] = idx
+                self.idx2word[idx] = word
 
     def numericalize(self, text):
         return [
-            self.stoi.get(word, self.stoi["<UNK>"]) for word in simple_tokenize(text)
+            self.word2idx.get(token, self.word2idx["<UNK>"])
+            for token in self.tokenizer(text)
         ]
