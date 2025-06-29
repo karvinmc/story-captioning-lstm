@@ -15,7 +15,7 @@ import pickle
 
 
 # --- Config ---
-EPOCHS = 6
+EPOCHS = 10
 BATCH_SIZE = 8
 EMBED_SIZE = 256
 HIDDEN_SIZE = 512
@@ -154,12 +154,12 @@ for epoch in range(start_epoch, EPOCHS):
             val_losses[-1],
             path=checkpoint_path,
         )
-    else:
-        counter += 1
-        print(f"Validation loss did not improve for {counter} epoch(s).")
-        if counter >= patience:
-            print("Early stopping triggered.")
-            break
+    # else:
+    #     counter += 1
+    #     print(f"Validation loss did not improve for {counter} epoch(s).")
+    #     if counter >= patience:
+    #         print("Early stopping triggered.")
+    #         break
 
 # --- Plot ---
 plot_losses(train_losses, val_losses)
