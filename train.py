@@ -140,19 +140,19 @@ if __name__ == "__main__":
             f"Epoch {epoch+1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
         )
 
-        # Early stopping
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            counter = 0
-            # Save best model
-            torch.save(cnn.state_dict(), "checkpoints/cnn_model.pth")
-            torch.save(story_encoder.state_dict(), "checkpoints/story_encoder.pth")
-            torch.save(lstm.state_dict(), "checkpoints/lstm_model.pth")
-        else:
-            counter += 1
-            if counter >= patience:
-                print("Early stopping triggered.")
-                break
+        # Early stopping (sementara tak disable)
+        # if val_loss < best_val_loss:
+        #     best_val_loss = val_loss
+        #     counter = 0
+        #     # Save best model
+        #     torch.save(cnn.state_dict(), "checkpoints/cnn_model.pth")
+        #     torch.save(story_encoder.state_dict(), "checkpoints/story_encoder.pth")
+        #     torch.save(lstm.state_dict(), "checkpoints/lstm_model.pth")
+        # else:
+        #     counter += 1
+        #     if counter >= patience:
+        #         print("Early stopping triggered.")
+        #         break
 
     # Save models after training
     torch.save(cnn.state_dict(), "checkpoints/cnn_model.pth")
