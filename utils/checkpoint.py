@@ -21,7 +21,6 @@ def save_checkpoint(
         "val_loss": val_loss,
     }
     torch.save(checkpoint, path)
-    print(f"[✓] Model saved to {path}")
 
 
 def load_checkpoint(path, encoder, decoder, optimizer=None):
