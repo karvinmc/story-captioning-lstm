@@ -102,7 +102,7 @@ if __name__ == "__main__":
     counter = 0
 
     # Training Loop
-    EPOCHS = 5
+    EPOCHS = 50
     for epoch in range(EPOCHS):
         cnn.train()
         story_encoder.train()
