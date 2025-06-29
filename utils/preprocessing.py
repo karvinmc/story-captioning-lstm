@@ -1,50 +1,62 @@
 import os
 import torch
+import json
 from PIL import Image
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
-from utils.vocab import Vocabulary
+from collections import defaultdict
+from config import MAX_CAPTION_LEN
 
 
-class Dataset(Dataset):
-    def __init__(self, image_folder, caption_file, vocab, transform=None, max_len=20):
+class StoryDataset(Dataset):
+    def __init__(
+        self, image_folder, json_file, vocab, transform=None, max_len=MAX_CAPTION_LEN
+    ):
         self.image_folder = image_folder
         self.vocab = vocab
         self.max_len = max_len
         self.transform = transform or transforms.Compose(
             [transforms.Resize((128, 128)), transforms.ToTensor()]
         )
-        # Load caption file
-        with open(caption_file, "r") as f:
-            lines = f.readlines()
 
-        # Mapping: image_name → [caption1, caption2, ...]
-        self.data = {}
-        for line in lines:
-            if "," in line:
-                img, caption = line.strip().split(",", 1)
-                img = img.split("#")[0]
-                self.data.setdefault(img, []).append(caption)
+        # Load JSON file
+        with open(json_file, "r") as f:
+            data = json.load(f)
 
-        # Gabungkan 3-5 caption menjadi satu kalimat naratif (story-driven)
+        # Group data by story_id
+        self.stories = defaultdict(list)
+        for item_list in data["annotations"]:
+            for item in item_list:
+                self.stories[item["story_id"]].append(item)
+
+        # Build entries: list of (image_paths, full_story_text)
         self.entries = []
-        for img, captions in self.data.items():
-            if len(captions) >= 3:
-                story = " ".join(captions[:3])  # bisa disesuaikan
-                self.entries.append((img, story))
+        for story_id, story_items in self.stories.items():
+            sorted_items = sorted(story_items, key=lambda x: x["image_order"])
+            image_paths = [
+                os.path.join(self.image_folder, f'{int(i["youtube_image_id"])}.jpg')
+                for i in sorted_items
+            ]
+            story_text = " ".join([i["storytext"] for i in sorted_items])
+            self.entries.append((image_paths, story_text))
 
     def __len__(self):
         return len(self.entries)
 
     def __getitem__(self, idx):
-        img_name, caption = self.entries[idx]
-        img_path = os.path.join(self.image_folder, img_name)
-        image = Image.open(img_path).convert("RGB")
-        image = self.transform(image)
+        image_paths, caption = self.entries[idx]
+        images = []
 
+        for path in image_paths:
+            image = Image.open(path).convert("RGB")
+            image = self.transform(image)
+            images.append(image)
+
+        # Convert caption to tokens
         tokens = [self.vocab.stoi["<SOS>"]]
         tokens += self.vocab.numericalize(caption)[: self.max_len - 2]
         tokens += [self.vocab.stoi["<EOS>"]]
         tokens += [self.vocab.stoi["<PAD>"]] * (self.max_len - len(tokens))
 
-        return image, torch.tensor(tokens)
+        images_tensor = torch.stack(images)  # [N, 3, H, W]
+        return images_tensor, torch.tensor(tokens)

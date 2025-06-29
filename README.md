@@ -9,16 +9,19 @@ The `dataset` folder is not included in this repository (see `.gitignore`).
 To download the dataset from Kaggle:
 
 1. **Download the dataset:**
-   [Flickr8k Dataset](https://www.kaggle.com/datasets/adityajn105/flickr8k)
+   [SSID Dataset](https://drive.google.com/drive/folders/1XDK6wVReQziJrJXakgi3_IgvKm8BnYCR)
 2. **Check your folder structure:**
    - `dataset/Images/` (contains images)
-   - `dataset/captions.txt` (contains captions)
+   - `dataset/Test.json`
+   - `dataset/Train.json`
+   - `dataset/Validation.json`
 
 ---
 
 ## Installing Dependencies
 
 Run the following command to install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
