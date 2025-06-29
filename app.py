@@ -14,7 +14,7 @@ import os
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 EMBED_SIZE = 256
 HIDDEN_SIZE = 512
-FREQ_THRESHOLD = 3
+FREQ_THRESHOLD = 1
 CHECKPOINT_PATH = "checkpoints/story_model.pth"
 VOCAB_PATH = "checkpoints/vocab.pkl"
 
@@ -89,7 +89,7 @@ def generate_caption(encoder, decoder, images, vocab, max_len=100):
 
             if predicted == vocab.word2idx["<EOS>"]:
                 break
-
+            
             story_caption.append(vocab.idx2word[predicted])
             inputs.append(predicted)
 

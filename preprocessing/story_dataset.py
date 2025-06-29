@@ -1,56 +1,53 @@
-import os
 import json
-import torch
 from PIL import Image
-from torch.utils.data import Dataset
+import torch
+from collections import defaultdict
 
 
-class StoryDataset(Dataset):
-    def __init__(self, json_path, image_dir, vocab, transform=None):
-        self.image_dir = image_dir
+class StoryDataset:
+    def __init__(self, json_path, img_dir, vocab, transform):
+        self.img_dir = img_dir
         self.vocab = vocab
         self.transform = transform
-        self.sequences = []
+        with open(json_path) as f:
+            self.data = json.load(f)["annotations"]
 
-        with open(json_path, "r") as f:
-            data = json.load(f)["annotations"]
+        # Group annotations by story_id
+        self.story_groups = defaultdict(list)
+        for group in self.data:
+            for item in group:
+                self.story_groups[item["story_id"]].append(item)
 
-        # Group by story_id
-        story_groups = {}
-        for item in data:
-            item = item[0]
-            sid = item["story_id"]
-            story_groups.setdefault(sid, []).append(item)
+        # Create list of stories
+        self.stories = []
+        for story_id, items in self.story_groups.items():
+            items = sorted(items, key=lambda x: x["image_order"])
+            images = [
+                f"{self.img_dir}/{item['youtube_image_id']}.jpg" for item in items
+            ]
+            caption = " ".join(
+                item["storytext"] for item in items if "storytext" in item
+            )
+            self.stories.append((images, caption))
 
-        # Filter and sort stories
-        for group in story_groups.values():
-            if len(group) != 5:
-                continue
-            group = sorted(group, key=lambda x: x["image_order"])
-            image_ids = [int(x["youtube_image_id"]) for x in group]
-            full_caption = " ".join([x["storytext"] for x in group])
-            self.sequences.append((image_ids, full_caption))
+        print(f"Dataset size: {len(self.stories)}")
+        print(f"Sample story: {self.stories[0]}")
 
     def __len__(self):
-        return len(self.sequences)
-    
+        return len(self.stories)
+
     def __getitem__(self, idx):
-        image_ids, full_caption = self.sequences[idx]
-        images = []
-
-        for img_id in image_ids:
-            img_path = os.path.join(self.image_dir, f"{img_id}.jpg")
-            image = Image.open(img_path).convert("RGB")
-            if self.transform:
-                image = self.transform(image)
-            images.append(image)
-
-        # Tokenize full story caption
-        tokens = (
+        images, caption = self.stories[idx]
+        # Load and transform images
+        image_tensors = [
+            self.transform(Image.open(img).convert("RGB")) for img in images
+        ]
+        images = torch.stack(image_tensors)  # (num_images, 3, H, W)
+        # Numericalize caption
+        caption = (
             [self.vocab.word2idx["<SOS>"]]
-            + self.vocab.numericalize(full_caption)
+            + self.vocab.numericalize(caption)
             + [self.vocab.word2idx["<EOS>"]]
         )
-        caption_tensor = torch.tensor(tokens, dtype=torch.long)
-
-        return torch.stack(images), caption_tensor  # (5, 3, H, W), (seq_len,)
+        caption = torch.tensor(caption)
+        return images, caption

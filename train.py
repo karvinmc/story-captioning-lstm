@@ -8,6 +8,7 @@ from models.decoder import LSTMDecoder
 from utils.vocab import Vocabulary
 from utils.plot import plot_losses
 from utils.checkpoint import save_checkpoint, load_checkpoint
+from collections import defaultdict
 from tqdm import tqdm
 import os
 import json
@@ -19,7 +20,7 @@ EPOCHS = 10
 BATCH_SIZE = 8
 EMBED_SIZE = 256
 HIDDEN_SIZE = 512
-FREQ_THRESHOLD = 3
+FREQ_THRESHOLD = 1
 LR = 1e-3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -33,12 +34,29 @@ transform = transforms.Compose(
 
 # --- Build Vocabulary ---
 with open("dataset/Train.json") as f:
-    train_data = json.load(f)["annotations"]
-captions = [
-    " ".join(item[0]["storytext"] for item in group)
-    for group in json.load(open("dataset/Train.json"))["annotations"]
-    if len(group) == 5
-]
+    train_data = json.load(f)
+annotations = train_data["annotations"]
+
+# Group annotations by story_id to form stories
+story_groups = defaultdict(list)
+for group in annotations:
+    for item in group:
+        story_id = item["story_id"]
+        story_groups[story_id].append(item)
+
+# Create captions by joining storytext for each story_id
+captions = []
+for story_id, items in story_groups.items():
+    # Sort by image_order to ensure correct sequence
+    items = sorted(items, key=lambda x: x["image_order"])
+    # Join storytext from all items in the story
+    caption = " ".join(item["storytext"] for item in items if "storytext" in item)
+    captions.append(caption)
+
+# Debug: Print captions to verify
+# print(f"Number of captions: {len(captions)}")
+# print(f"Sample captions: {captions[:5]}")
+
 vocab = Vocabulary(FREQ_THRESHOLD)
 vocab.build_vocab(captions)
 
@@ -46,6 +64,10 @@ vocab.build_vocab(captions)
 os.makedirs("checkpoints", exist_ok=True)
 with open("checkpoints/vocab.pkl", "wb") as f:
     pickle.dump(vocab, f)
+
+# Debug: Print vocabulary size and sample words
+# print(f"Vocabulary size: {len(vocab)}")
+# print(f"Sample words: {list(vocab.word2idx.keys())[:20]}")
 
 print("Vocabulary saved to checkpoints/vocab.pkl")
 
@@ -73,7 +95,7 @@ start_epoch = 0
 train_losses, val_losses = [], []
 best_val_loss = float("inf")
 patience = 3  # <-- tambahkan ini untuk early stopping
-counter = 0   # <-- tambahkan ini untuk early stopping
+counter = 0  # <-- tambahkan ini untuk early stopping
 
 if os.path.exists(checkpoint_path):
     # Load checkpoint and restore everything
