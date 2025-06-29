@@ -11,6 +11,8 @@ from utils.checkpoint import save_checkpoint, load_checkpoint
 from tqdm import tqdm
 import os
 import json
+import pickle
+
 
 # --- Config ---
 EPOCHS = 6
@@ -39,6 +41,13 @@ captions = [
 ]
 vocab = Vocabulary(FREQ_THRESHOLD)
 vocab.build_vocab(captions)
+
+# Save vocab
+os.makedirs("checkpoints", exist_ok=True)
+with open("checkpoints/vocab.pkl", "wb") as f:
+    pickle.dump(vocab, f)
+
+print("Vocabulary saved to checkpoints/vocab.pkl")
 
 # --- Datasets ---
 train_ds = StoryDataset("dataset/Train.json", "dataset/Images", vocab, transform)

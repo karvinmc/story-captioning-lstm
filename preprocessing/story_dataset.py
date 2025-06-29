@@ -33,7 +33,7 @@ class StoryDataset(Dataset):
 
     def __len__(self):
         return len(self.sequences)
-
+    
     def __getitem__(self, idx):
         image_ids, full_caption = self.sequences[idx]
         images = []
