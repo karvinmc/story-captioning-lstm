@@ -46,13 +46,14 @@ if __name__ == "__main__":
     # Model
     cnn = SimpleCNN(output_dim=EMBEDDING_DIM).to(device)
     story_encoder = StoryEncoder(
-        feature_dim=EMBEDDING_DIM, hidden_dim=EMBEDDING_DIM
+        feature_dim=EMBEDDING_DIM, hidden_dim=EMBEDDING_DIM, dropout=0.3
     ).to(device)
     lstm = CaptionLSTM(
         embed_size=EMBEDDING_DIM,
         hidden_size=HIDDEN_DIM,
         vocab_size=len(vocab.stoi),
         feature_size=EMBEDDING_DIM,  # Ensure this matches CNN output
+        dropout=0.3
     ).to(device)
 
     # Load weights if available
@@ -75,7 +76,7 @@ if __name__ == "__main__":
         + list(story_encoder.parameters())
         + list(lstm.parameters())
     )
-    optimizer = optim.Adam(params, lr=3e-4)
+    optimizer = optim.Adam(params, lr=3e-4, weight_decay=1e-5)
 
     def evaluate(model_cnn, model_story_encoder, model_lstm, dataloader, criterion):
         model_cnn.eval()
@@ -100,6 +101,9 @@ if __name__ == "__main__":
     best_val_loss = float("inf")
     patience = 3
     counter = 0
+
+    train_losses = []
+    val_losses = []
 
     # Training Loop
     EPOCHS = 50
@@ -130,6 +134,8 @@ if __name__ == "__main__":
 
         train_loss = epoch_loss / len(dataloader)
         val_loss = evaluate(cnn, story_encoder, lstm, val_dataloader, criterion)
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
         print(
             f"Epoch {epoch+1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
         )
@@ -152,3 +158,14 @@ if __name__ == "__main__":
     torch.save(cnn.state_dict(), "checkpoints/cnn_model.pth")
     torch.save(story_encoder.state_dict(), "checkpoints/story_encoder.pth")
     torch.save(lstm.state_dict(), "checkpoints/lstm_model.pth")
+
+    # Plot training and validation loss curves
+    plt.figure()
+    plt.plot(train_losses, label='Train Loss')
+    plt.plot(val_losses, label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss Curves')
+    plt.legend()
+    plt.savefig('loss_curve.png')
+    plt.show()

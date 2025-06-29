@@ -2,6 +2,7 @@ import torch
 from PIL import Image
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
+import os
 
 from models.cnn import SimpleCNN
 from models.lstm import CaptionLSTM
@@ -15,9 +16,11 @@ cnn_path = "checkpoints/cnn_model.pth"
 lstm_path = "checkpoints/lstm_model.pth"
 story_encoder_path = "checkpoints/story_encoder.pth"
 image_paths = [
-    "img/story1.jpg",
-    "img/story2.jpg",
-    "img/story3.jpg",
+    "dataset/Images/2036.jpg",
+    "dataset/Images/2037.jpg",
+    "dataset/Images/2038.jpg",
+    "dataset/Images/2039.jpg",
+    "dataset/Images/2040.jpg",
 ]  # ubah dengan gambar yang ingin diuji
 
 # --- Load Vocabulary ---
@@ -26,7 +29,9 @@ vocab = torch.load("checkpoints/vocab.pt")
 
 # --- Load Models ---
 cnn = SimpleCNN(output_dim=EMBEDDING_DIM).to(device)
-story_encoder = StoryEncoder(feature_dim=EMBEDDING_DIM, hidden_dim=EMBEDDING_DIM).to(device)
+story_encoder = StoryEncoder(feature_dim=EMBEDDING_DIM, hidden_dim=EMBEDDING_DIM).to(
+    device
+)
 lstm = CaptionLSTM(
     embed_size=EMBEDDING_DIM,
     hidden_size=HIDDEN_DIM,
@@ -36,7 +41,7 @@ lstm = CaptionLSTM(
 
 cnn.load_state_dict(torch.load(cnn_path, map_location=device))
 lstm.load_state_dict(torch.load(lstm_path, map_location=device))
-if torch.exists(story_encoder_path):
+if os.path.exists(story_encoder_path):
     story_encoder.load_state_dict(torch.load(story_encoder_path, map_location=device))
 cnn.eval()
 lstm.eval()
@@ -89,9 +94,7 @@ def clean_caption(caption: str) -> str:
 if __name__ == "__main__":
     images = load_images(image_paths)
     caption = generate_caption_from_sequence(images)
-    caption = clean_caption(
-        caption
-    )  # Clean caption to ensure it ends with a period
+    caption = clean_caption(caption)  # Clean caption to ensure it ends with a period
 
     print("Generated Story Caption:", caption)
 
