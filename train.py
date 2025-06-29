@@ -46,14 +46,13 @@ if __name__ == "__main__":
     # Model
     cnn = SimpleCNN(output_dim=EMBEDDING_DIM).to(device)
     story_encoder = StoryEncoder(
-        feature_dim=EMBEDDING_DIM, hidden_dim=EMBEDDING_DIM, dropout=0.3
+        feature_dim=EMBEDDING_DIM, hidden_dim=EMBEDDING_DIM,
     ).to(device)
     lstm = CaptionLSTM(
         embed_size=EMBEDDING_DIM,
         hidden_size=HIDDEN_DIM,
         vocab_size=len(vocab.stoi),
-        feature_size=EMBEDDING_DIM,  # Ensure this matches CNN output
-        dropout=0.3
+        feature_size=EMBEDDING_DIM,
     ).to(device)
 
     # Load weights if available
@@ -106,7 +105,7 @@ if __name__ == "__main__":
     val_losses = []
 
     # Training Loop
-    EPOCHS = 50
+    EPOCHS = 10
     for epoch in range(EPOCHS):
         cnn.train()
         story_encoder.train()
