@@ -2,12 +2,12 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from torchvision.models import ResNet18_Weights
 
 
 class CNNEncoder(nn.Module):
     def __init__(self, embed_size):
-        super(CNNEncoder, self).__init__()
-        resnet = models.resnet18(weights=None)
+        resnet = models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         modules = list(resnet.children())[:-1]  # Remove FC
         self.resnet = nn.Sequential(*modules)
         self.linear = nn.Linear(resnet.fc.in_features, embed_size)

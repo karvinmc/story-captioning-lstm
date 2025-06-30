@@ -7,7 +7,6 @@ from utils.vocab import Vocabulary
 from utils.checkpoint import load_checkpoint
 import matplotlib.pyplot as plt
 import textwrap
-import pickle
 import os
 
 # -------- Config --------
@@ -54,55 +53,32 @@ load_checkpoint(CHECKPOINT_PATH, encoder, decoder)
 encoder.eval()
 decoder.eval()
 
+# -------- Generate Caption --------
+with torch.no_grad():
+    # Load and preprocess images
+    image_tensors = [transform(Image.open(img).convert("RGB")) for img in image_paths]
+    images_batch = torch.stack(image_tensors).unsqueeze(0).to(DEVICE)  # (1, 5, 3, 224, 224)
 
-# -------- Greedy Caption Generator --------
-def generate_caption(encoder, decoder, images, vocab, max_len=100):
-    with torch.no_grad():
-        # Load and preprocess images
-        image_tensors = [transform(Image.open(img).convert("RGB")) for img in images]
-        images_batch = (
-            torch.stack(image_tensors).unsqueeze(0).to(DEVICE)
-        )  # (1, 5, 3, 224, 224)
+    # Encode images
+    features = encoder(images_batch)  # (1, 5, embed_size)
 
-        # Encode images
-        features = encoder(images_batch)  # (1, 5, embed)
-        combined = features.view(1, -1)  # (1, 5 * embed)
-        feat_embed = decoder.feat_proj(combined).unsqueeze(1)  # (1, 1, embed)
+    # Generate caption with beam search
+    generated = decoder.generate(
+        features,
+        max_len=100,
+        start_token_idx=vocab.word2idx["<SOS>"],
+        end_token_idx=vocab.word2idx["<EOS>"],
+        beam_width=3
+    )
+    story = " ".join([vocab.idx2word[idx.item()] for idx in generated[0] if idx.item() not in [vocab.word2idx["<SOS>"], vocab.word2idx["<EOS>"]]])
 
-        # Start decoding
-        inputs = [vocab.word2idx["<SOS>"]]
-        story_caption = []
-
-        for _ in range(max_len):
-            input_tensor = torch.tensor(inputs).unsqueeze(0).to(DEVICE)  # (1, seq_len)
-            embedded = decoder.embedding(input_tensor)  # (1, seq_len, embed)
-            repeated_feat = feat_embed.expand(
-                -1, embedded.size(1), -1
-            )  # (1, seq_len, embed)
-            lstm_input = torch.cat(
-                [embedded, repeated_feat], dim=2
-            )  # (1, seq_len, embed*2)
-
-            out, _ = decoder.lstm(lstm_input)
-            out = decoder.linear(out[:, -1, :])  # (1, vocab_size)
-            predicted = out.argmax(1).item()
-
-            if predicted == vocab.word2idx["<EOS>"]:
-                break
-            
-            story_caption.append(vocab.idx2word[predicted])
-            inputs.append(predicted)
-
-        return " ".join(story_caption)
-
-
-# -------- Run Inference --------
-story = generate_caption(encoder, decoder, image_paths, vocab)
 print("Generated Story:\n", story)
 
 # -------- Visualization --------
-fig, axes = plt.subplots(1, 5, figsize=(20, 5))
-
+num_images = len(image_paths)
+fig, axes = plt.subplots(1, num_images, figsize=(4 * num_images, 5))
+if num_images == 1:
+    axes = [axes]  # Handle single axis case
 for i, img_path in enumerate(image_paths):
     image = Image.open(img_path).convert("RGB")
     axes[i].imshow(image)
@@ -110,7 +86,7 @@ for i, img_path in enumerate(image_paths):
 
 # Wrap long story text
 wrapped_story = "\n".join(textwrap.wrap(story, width=120))
-fig.suptitle(wrapped_story, fontsize=12, y=1.08)  # Adjust y if text overlaps
+fig.suptitle(wrapped_story, fontsize=12, y=1.08)
 
 plt.tight_layout()
 plt.show()

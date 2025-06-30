@@ -21,16 +21,24 @@ BATCH_SIZE = 8
 EMBED_SIZE = 256
 HIDDEN_SIZE = 512
 FREQ_THRESHOLD = 1
-LR = 1e-3
+LR = 3e-4
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --- Transform ---
-transform = transforms.Compose(
-    [
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ]
-)
+# Training transform with augmentation
+train_transform = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.RandomCrop((224, 224)),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    transforms.ToTensor(),
+])
+
+# Validation transform (no augmentation)
+val_transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+])
 
 # --- Build Vocabulary ---
 with open("dataset/Train.json") as f:
@@ -72,8 +80,8 @@ with open("checkpoints/vocab.pkl", "wb") as f:
 print("Vocabulary saved to checkpoints/vocab.pkl")
 
 # --- Datasets ---
-train_ds = StoryDataset("dataset/Train.json", "dataset/Images", vocab, transform)
-val_ds = StoryDataset("dataset/Validation.json", "dataset/Images", vocab, transform)
+train_ds = StoryDataset("dataset/Train.json", "dataset/Images", vocab, train_transform)
+val_ds = StoryDataset("dataset/Validation.json", "dataset/Images", vocab, val_transform)
 
 train_dl = DataLoader(
     train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=lambda x: x
@@ -87,24 +95,22 @@ encoder = CNNEncoder(EMBED_SIZE).to(DEVICE)
 decoder = LSTMDecoder(EMBED_SIZE, HIDDEN_SIZE, len(vocab)).to(DEVICE)
 criterion = nn.CrossEntropyLoss(ignore_index=vocab.word2idx["<PAD>"])
 optimizer = torch.optim.Adam(
-    list(encoder.parameters()) + list(decoder.parameters()), lr=LR
+    list(encoder.parameters()) + list(decoder.parameters()), lr=LR, weight_decay=1e-4
 )
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1, verbose=True)
 
 checkpoint_path = "checkpoints/story_model.pth"
 start_epoch = 0
 train_losses, val_losses = [], []
 best_val_loss = float("inf")
-patience = 3  # <-- tambahkan ini untuk early stopping
+patience = 5  # <-- tambahkan ini untuk early stopping
 counter = 0  # <-- tambahkan ini untuk early stopping
 
 if os.path.exists(checkpoint_path):
-    # Load checkpoint and restore everything
-    last_epoch, last_train_loss, last_val_loss = load_checkpoint(
+    last_epoch, last_train_loss, last_val_loss, train_losses, val_losses = load_checkpoint(
         checkpoint_path, encoder, decoder, optimizer
     )
-    print(
-        f"Resumed from Epoch {last_epoch} | Train Loss: {last_train_loss:.4f}, Val Loss: {last_val_loss:.4f}"
-    )
+    print(f"Resumed from Epoch {last_epoch} | Train Loss: {last_train_loss:.4f}, Val Loss: {last_val_loss:.4f}")
     start_epoch = last_epoch  # continue from last saved epoch
     # Optionally, load train_losses and val_losses if you save them in checkpoint
 else:
@@ -161,6 +167,7 @@ for epoch in range(start_epoch, EPOCHS):
             val_loss += loss.item()
 
     val_losses.append(val_loss / len(val_dl))
+    scheduler.step(val_losses[-1])
     print(f"Train Loss: {train_losses[-1]:.4f} | Val Loss: {val_losses[-1]:.4f}")
 
     # Save best model & early stopping logic
@@ -176,12 +183,12 @@ for epoch in range(start_epoch, EPOCHS):
             val_losses[-1],
             path=checkpoint_path,
         )
-    # else:
-    #     counter += 1
-    #     print(f"Validation loss did not improve for {counter} epoch(s).")
-    #     if counter >= patience:
-    #         print("Early stopping triggered.")
-    #         break
+    else:
+        counter += 1
+        print(f"Validation loss did not improve for {counter} epoch(s).")
+        if counter >= patience:
+            print("Early stopping triggered.")
+            break
 
 # --- Plot ---
 plot_losses(train_losses, val_losses)
