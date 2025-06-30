@@ -16,7 +16,7 @@ import pickle
 
 
 # --- Config ---
-EPOCHS = 10
+EPOCHS = 150
 BATCH_SIZE = 8
 EMBED_SIZE = 256
 HIDDEN_SIZE = 512

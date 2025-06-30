@@ -30,8 +30,8 @@ class StoryDataset:
             )
             self.stories.append((images, caption))
 
-        print(f"Dataset size: {len(self.stories)}")
-        print(f"Sample story: {self.stories[0]}")
+        # print(f"Dataset size: {len(self.stories)}")
+        # print(f"Sample story: {self.stories[0]}")
 
     def __len__(self):
         return len(self.stories)
