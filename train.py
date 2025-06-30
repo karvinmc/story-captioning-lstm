@@ -3,8 +3,7 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from preprocessing.story_dataset import StoryDataset
-from models.encoder import CNNEncoder
-from models.decoder import LSTMDecoder
+from models.clip_transformer import CLIPTransformerModel
 from utils.vocab import Vocabulary
 from utils.plot import plot_losses
 from utils.checkpoint import save_checkpoint, load_checkpoint
@@ -14,30 +13,27 @@ import os
 import json
 import pickle
 
-
 # --- Config ---
 EPOCHS = 10
-BATCH_SIZE = 8
-EMBED_SIZE = 256
-HIDDEN_SIZE = 512
+BATCH_SIZE = 4  # Reduced due to CLIP's memory requirements
+EMBED_SIZE = 768  # Match CLIP-ViT-L-336px feature dimension
 FREQ_THRESHOLD = 1
 LR = 3e-4
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --- Transform ---
-# Training transform with augmentation
 train_transform = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.RandomCrop((224, 224)),
+    transforms.Resize((336, 336)),
     transforms.RandomHorizontalFlip(p=0.5),
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-    transforms.ToTensor(),
+    transforms.ToTensor()
+    # Jangan normalize! CLIPProcessor akan melakukan ini
 ])
 
-# Validation transform (no augmentation)
 val_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
+    transforms.Resize((336, 336)),
+    transforms.ToTensor()
+    # Jangan normalize!
 ])
 
 # --- Build Vocabulary ---
@@ -55,15 +51,9 @@ for group in annotations:
 # Create captions by joining storytext for each story_id
 captions = []
 for story_id, items in story_groups.items():
-    # Sort by image_order to ensure correct sequence
     items = sorted(items, key=lambda x: x["image_order"])
-    # Join storytext from all items in the story
     caption = " ".join(item["storytext"] for item in items if "storytext" in item)
     captions.append(caption)
-
-# Debug: Print captions to verify
-# print(f"Number of captions: {len(captions)}")
-# print(f"Sample captions: {captions[:5]}")
 
 vocab = Vocabulary(FREQ_THRESHOLD)
 vocab.build_vocab(captions)
@@ -72,10 +62,6 @@ vocab.build_vocab(captions)
 os.makedirs("checkpoints", exist_ok=True)
 with open("checkpoints/vocab.pkl", "wb") as f:
     pickle.dump(vocab, f)
-
-# Debug: Print vocabulary size and sample words
-# print(f"Vocabulary size: {len(vocab)}")
-# print(f"Sample words: {list(vocab.word2idx.keys())[:20]}")
 
 print("Vocabulary saved to checkpoints/vocab.pkl")
 
@@ -91,11 +77,14 @@ val_dl = DataLoader(
 )
 
 # --- Model ---
-encoder = CNNEncoder(EMBED_SIZE).to(DEVICE)
-decoder = LSTMDecoder(EMBED_SIZE, HIDDEN_SIZE, len(vocab)).to(DEVICE)
+model = CLIPTransformerModel(len(vocab), embed_size=EMBED_SIZE).to(DEVICE)
 criterion = nn.CrossEntropyLoss(ignore_index=vocab.word2idx["<PAD>"])
 optimizer = torch.optim.Adam(
-    list(encoder.parameters()) + list(decoder.parameters()), lr=LR, weight_decay=1e-4
+    list(model.transformer_decoder.parameters()) +
+    list(model.embedding.parameters()) +
+    list(model.linear.parameters()),
+    lr=LR,
+    weight_decay=1e-4
 )
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1)
 
@@ -103,39 +92,36 @@ checkpoint_path = "checkpoints/story_model.pth"
 start_epoch = 0
 train_losses, val_losses = [], []
 best_val_loss = float("inf")
-patience = 5  # <-- tambahkan ini untuk early stopping
-counter = 0  # <-- tambahkan ini untuk early stopping
+patience = 5
+counter = 0
 
 if os.path.exists(checkpoint_path):
     last_epoch, last_train_loss, last_val_loss, train_losses, val_losses = load_checkpoint(
-        checkpoint_path, encoder, decoder, optimizer
+        checkpoint_path, model, optimizer
     )
     print(f"Resumed from Epoch {last_epoch} | Train Loss: {last_train_loss:.4f}, Val Loss: {last_val_loss:.4f}")
-    start_epoch = last_epoch  # continue from last saved epoch
-    # Optionally, load train_losses and val_losses if you save them in checkpoint
+    start_epoch = last_epoch
 else:
     print("No checkpoint found. Starting from scratch.")
 
 # --- Training ---
 for epoch in range(start_epoch, EPOCHS):
     print(f"\n--- Epoch {epoch+1}/{EPOCHS} ---")
-    encoder.train()
-    decoder.train()
+    model.train()
     total_loss = 0
 
     for batch in tqdm(train_dl, desc=f"Train Epoch {epoch+1}"):
         images, captions = zip(*batch)
-        images = torch.stack(images).to(DEVICE)  # (B, 5, 3, H, W)
-        captions = torch.nn.utils.rnn.pad_sequence(captions, batch_first=True).to(
-            DEVICE
-        )  # (B, seq_len)
+        images = torch.stack(images).to(DEVICE)  # (B, 5, 3, 336, 336)
+        captions = torch.nn.utils.rnn.pad_sequence(captions, batch_first=True).to(DEVICE)  # (B, seq_len)
 
         inputs = captions[:, :-1]
         targets = captions[:, 1:]
 
         optimizer.zero_grad()
-        features = encoder(images)  # (B, 5, embed)
-        outputs = decoder(features, inputs)  # (B, seq_len-1, vocab_size)
+        # Generate causal mask for transformer
+        tgt_mask = nn.Transformer.generate_square_subsequent_mask(inputs.size(1)).to(DEVICE)
+        outputs = model(images, inputs, tgt_mask=tgt_mask)  # (B, seq_len-1, vocab_size)
 
         loss = criterion(outputs.view(-1, outputs.size(2)), targets.reshape(-1))
         loss.backward()
@@ -145,23 +131,20 @@ for epoch in range(start_epoch, EPOCHS):
     train_losses.append(total_loss / len(train_dl))
 
     # --- Validation ---
-    encoder.eval()
-    decoder.eval()
+    model.eval()
     val_loss = 0
 
     with torch.no_grad():
         for batch in tqdm(val_dl, desc=f"Val Epoch {epoch+1}"):
             images, captions = zip(*batch)
             images = torch.stack(images).to(DEVICE)
-            captions = torch.nn.utils.rnn.pad_sequence(captions, batch_first=True).to(
-                DEVICE
-            )
+            captions = torch.nn.utils.rnn.pad_sequence(captions, batch_first=True).to(DEVICE)
 
             inputs = captions[:, :-1]
             targets = captions[:, 1:]
 
-            features = encoder(images)
-            outputs = decoder(features, inputs)
+            tgt_mask = nn.Transformer.generate_square_subsequent_mask(inputs.size(1)).to(DEVICE)
+            outputs = model(images, inputs, tgt_mask=tgt_mask)
 
             loss = criterion(outputs.view(-1, outputs.size(2)), targets.reshape(-1))
             val_loss += loss.item()
@@ -170,15 +153,13 @@ for epoch in range(start_epoch, EPOCHS):
     scheduler.step(val_losses[-1])
     print(f"Train Loss: {train_losses[-1]:.4f} | Val Loss: {val_losses[-1]:.4f}")
 
-    # Save best model & early stopping logic
     if val_losses[-1] < best_val_loss:
         best_val_loss = val_losses[-1]
-        counter = 0  # reset counter jika ada perbaikan
+        counter = 0
         save_checkpoint(
-            encoder,
-            decoder,
+            model,
             optimizer,
-            epoch + 1,  # save current epoch (so next start from here)
+            epoch + 1,
             train_losses[-1],
             val_losses[-1],
             path=checkpoint_path,

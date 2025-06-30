@@ -1,8 +1,7 @@
 import torch
 import torchvision.transforms as transforms
 from PIL import Image
-from models.encoder import CNNEncoder
-from models.decoder import LSTMDecoder
+from models.clip_transformer import CLIPTransformerModel
 from utils.vocab import Vocabulary
 from utils.checkpoint import load_checkpoint
 import matplotlib.pyplot as plt
@@ -12,8 +11,7 @@ import pickle
 
 # -------- Config --------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-EMBED_SIZE = 256
-HIDDEN_SIZE = 512
+EMBED_SIZE = 768  # Match CLIP's feature dimension
 FREQ_THRESHOLD = 1
 CHECKPOINT_PATH = "checkpoints/story_model.pth"
 VOCAB_PATH = "checkpoints/vocab.pkl"
@@ -28,44 +26,34 @@ image_paths = [
 ]
 
 # -------- Safety Check --------
-assert all(
-    os.path.exists(path) for path in image_paths
-), "One or more image paths do not exist!"
-assert os.path.exists(CHECKPOINT_PATH), "Checkpoint file not found!"
+assert all(os.path.exists(path) for path in image_paths), "One or more image paths do not exist!"
 assert os.path.exists(VOCAB_PATH), "Vocabulary file not found!"
 
 # -------- Preprocessing --------
-transform = transforms.Compose(
-    [
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ]
-)
+transform = transforms.Compose([
+    transforms.Resize((336, 336)),  # CLIP requires 336x336
+    transforms.ToTensor()
+])
 
 # -------- Load Vocabulary --------
 with open(VOCAB_PATH, "rb") as f:
     vocab = pickle.load(f)
 
 # -------- Load Model --------
-encoder = CNNEncoder(EMBED_SIZE).to(DEVICE)
-decoder = LSTMDecoder(EMBED_SIZE, HIDDEN_SIZE, len(vocab)).to(DEVICE)
-load_checkpoint(CHECKPOINT_PATH, encoder, decoder)
+model = CLIPTransformerModel(len(vocab), embed_size=EMBED_SIZE).to(DEVICE)
+if os.path.exists(CHECKPOINT_PATH):
+    load_checkpoint(CHECKPOINT_PATH, model)
+else:
+    print("Checkpoint not found. Using untrained model (results may be poor).")
 
-encoder.eval()
-decoder.eval()
+model.eval()
 
 # -------- Generate Caption --------
 with torch.no_grad():
-    # Load and preprocess images
     image_tensors = [transform(Image.open(img).convert("RGB")) for img in image_paths]
-    images_batch = torch.stack(image_tensors).unsqueeze(0).to(DEVICE)  # (1, 5, 3, 224, 224)
-
-    # Encode images
-    features = encoder(images_batch)  # (1, 5, embed_size)
-
-    # Generate caption with beam search
-    generated = decoder.generate(
-        features,
+    images_batch = torch.stack(image_tensors).unsqueeze(0).to(DEVICE)  # (1, 5, 3, 336, 336)
+    generated = model.generate(
+        images_batch,
         max_len=100,
         start_token_idx=vocab.word2idx["<SOS>"],
         end_token_idx=vocab.word2idx["<EOS>"],
@@ -79,13 +67,12 @@ print("Generated Story:\n", story)
 num_images = len(image_paths)
 fig, axes = plt.subplots(1, num_images, figsize=(4 * num_images, 5))
 if num_images == 1:
-    axes = [axes]  # Handle single axis case
+    axes = [axes]
 for i, img_path in enumerate(image_paths):
     image = Image.open(img_path).convert("RGB")
     axes[i].imshow(image)
     axes[i].axis("off")
 
-# Wrap long story text
 wrapped_story = "\n".join(textwrap.wrap(story, width=120))
 fig.suptitle(wrapped_story, fontsize=12, y=1.08)
 
