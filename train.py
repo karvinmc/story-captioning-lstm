@@ -97,7 +97,7 @@ criterion = nn.CrossEntropyLoss(ignore_index=vocab.word2idx["<PAD>"])
 optimizer = torch.optim.Adam(
     list(encoder.parameters()) + list(decoder.parameters()), lr=LR, weight_decay=1e-4
 )
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1, verbose=True)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1)
 
 checkpoint_path = "checkpoints/story_model.pth"
 start_epoch = 0
